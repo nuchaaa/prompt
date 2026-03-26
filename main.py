@@ -1,5 +1,11 @@
 import cv2 as cv
 import time
+from collections import defaultdict
+
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 
 from detector.preprocess import preprocess
 from detector.face_detector import load_face_cascade, detect_faces
@@ -7,6 +13,50 @@ from detector.webcam_utils import calculate_fps, save_screenshot
 
 from emotion.classifier import classify_emotion
 from emotion.visualization import draw_face_result
+
+EMOTIONS = ["angry", "disgust", "fear", "happy", "sad", "surprise", "neutral"]
+
+
+def show_session_summary(emotion_counts: dict, session_seconds: float):
+    emotions = EMOTIONS
+    counts = [emotion_counts.get(e, 0) for e in emotions]
+    total = sum(counts)
+
+    colors = ["#e74c3c", "#2ecc71", "#9b59b6", "#f1c40f", "#3498db", "#e67e22", "#95a5a6"]
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+    fig.suptitle(
+        f"Webcam Session Summary  |  {total} detections  |  {session_seconds:.0f}s",
+        fontsize=14, fontweight="bold"
+    )
+
+    bars = axes[0].bar(emotions, counts, color=colors, edgecolor="white")
+    axes[0].set_title("Detection count per emotion")
+    axes[0].set_xlabel("Emotion")
+    axes[0].set_ylabel("Count")
+    axes[0].tick_params(axis="x", rotation=30)
+    for bar, cnt in zip(bars, counts):
+        if cnt > 0:
+            axes[0].text(bar.get_x() + bar.get_width() / 2,
+                         bar.get_height() + 0.3, str(cnt),
+                         ha="center", va="bottom", fontsize=9)
+
+    if total > 0:
+        non_zero = [(e, c, col) for e, c, col in zip(emotions, counts, colors) if c > 0]
+        axes[1].pie([x[1] for x in non_zero],
+                    labels=[x[0] for x in non_zero],
+                    colors=[x[2] for x in non_zero],
+                    autopct="%1.1f%%", startangle=140)
+    else:
+        axes[1].text(0.5, 0.5, "No faces detected", ha="center", va="center")
+        axes[1].axis("off")
+    axes[1].set_title("Emotion distribution (%)")
+
+    plt.tight_layout()
+    save_path = f"session_summary_{int(time.time())}.png"
+    plt.savefig(save_path, dpi=120)
+    plt.show()
+    print(f"Session summary saved → {save_path}")
 
 
 def main():
@@ -23,9 +73,11 @@ def main():
         return
 
     prev_time = 0
+    start_time = time.time()
     frame_cnt = 0
     n = 5
     last_faces = []
+    emotion_counts = defaultdict(int)
 
     print("Controls: 'S' for Screenshot, 'Q' to Quit")
 
@@ -55,7 +107,7 @@ def main():
                 1
             )
 
-            face = frame[y:y+h, x:x+w]
+            face = frame[y:y + h, x:x + w]
 
             if face.size > 0:
                 processed_face = preprocess(face)
@@ -78,7 +130,9 @@ def main():
 
                 if result["success"]:
                     draw_face_result(frame, x, y, w, h, result)
+                    emotion_counts[result["dominant_emotion"]] += 1
                 else:
+                    print("Emotion Error:", result["error"])
                     cv.putText(
                         frame,
                         "Emotion Error",
@@ -111,6 +165,8 @@ def main():
 
     capt.release()
     cv.destroyAllWindows()
+
+    show_session_summary(dict(emotion_counts), time.time() - start_time)
 
 
 if __name__ == "__main__":
